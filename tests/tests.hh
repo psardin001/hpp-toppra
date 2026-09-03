@@ -18,4 +18,6 @@ typedef hc::steeringMethod::Spline<hc::path::BernsteinBasis, 5>
 
 hp::DevicePtr_t makeDevice();
 
-hc::PathVectorPtr_t makeCubicSpline(hc::ProblemPtr_t p);
+hc::PathVectorPtr_t makeCubicSpline(hc::ProblemPtr_t p,
+                                    hc::value_type qStart = 0.,
+                                    hc::value_type qEnd = 1.);

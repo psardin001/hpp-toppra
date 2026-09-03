@@ -49,14 +49,15 @@ hp::DevicePtr_t makeDevice() {
   return device;
 }
 
-hc::PathVectorPtr_t makeCubicSpline(hc::ProblemPtr_t p) {
+hc::PathVectorPtr_t makeCubicSpline(hc::ProblemPtr_t p, hc::value_type qStart,
+                                    hc::value_type qEnd) {
   auto sm = SteerSplineOrder3::create(p);
   hp::vector_t q1(p->robot()->neutralConfiguration()), q2(q1);
   hp::matrix_t d1(p->robot()->numberDof(), 1), d2(p->robot()->numberDof(), 1);
   std::vector<int> orders{1};
 
-  q1 << 0.0;
-  q2 << 1.0;
+  q1 << qStart;
+  q2 << qEnd;
   d1 << 0.1;
   d2 << 0.1;
 
@@ -64,6 +65,13 @@ hc::PathVectorPtr_t makeCubicSpline(hc::ProblemPtr_t p) {
   auto inputPath =
       hc::PathVector::create(p->robot()->configSize(), p->robot()->numberDof());
   inputPath->appendPath(spline);
+  return inputPath;
+}
+
+hc::PathVectorPtr_t makeTwoCubicSplines(hc::ProblemPtr_t p) {
+  hc::PathVectorPtr_t inputPath = makeCubicSpline(p, 0., 0.5);
+  hc::PathVectorPtr_t continuation = makeCubicSpline(p, 0.5, 1.);
+  inputPath->appendPath(continuation->pathAtRank(0));
   return inputPath;
 }
 
@@ -158,9 +166,10 @@ TEST_CASE("Run TOPPRA optimizer: all cases") {
       makeCubicSpline(problem),
       makeQuinticSpline(problem, 0.2, 0.2),
       makeQuinticSpline(problem, 0.0, 0.1),
+      makeTwoCubicSplines(problem),
   };
 
-  int iInputPath = GENERATE(0, 1, 2);
+  int iInputPath = GENERATE(0, 1, 2, 3);
   hc::PathVectorPtr_t inputPath = inputPaths[iInputPath];
 
   std::vector<hc::vector_t> accLimitss = {
@@ -196,6 +205,10 @@ TEST_CASE("Run TOPPRA optimizer: all cases") {
   hp::value_type t0 = outputPath->timeRange().first,
                  t1 = outputPath->timeRange().second;
 
+  hp::vector_t velocityBound(device->numberDof());
+  outputPath->velocityBound(velocityBound, t0, t1);
+  CHECK(velocityBound.allFinite());
+
   // Check that initial and final velocities are zero
   for (auto t : {t0, t1}) {
     outputPath->derivative(v, t, 1);
@@ -218,6 +231,7 @@ TEST_CASE("Run TOPPRA optimizer: all cases") {
 
     outputPath->derivative(v, t, 1);
     outputPath->derivative(a, t, 2);
+    CHECK(std::abs(v[0]) <= velocityBound[0] + 1e-10);
     CHECK(v[0] < velLimit * constraintRelativeTol);
     if (accLimits.size() > 0)
       CHECK(a[0] < accLimits[0] * constraintRelativeTol);
@@ -310,6 +324,12 @@ TEST_CASE("PiecewisePolynomial") {
   TimeParam_t param(c, t);
 
   CHECK_NOTHROW(param.value(6.0));
+  CHECK(std::abs(param.derivativeBound(5.0, 7.0) - 2.5) < 1e-12);
+  CHECK(std::abs(param.derivativeBound(5.0, 12.0) - 3.5) < 1e-12);
+  CHECK(std::abs(param.derivativeBound(4.0, 13.0) - 3.5) < 1e-12);
+  CHECK(std::abs(param.derivativeBound(7.0, 7.0) - 2.5) < 1e-12);
+  CHECK_THROWS(param.derivativeBound(3.0, 4.0));
+  CHECK_THROWS(param.derivativeBound(7.0, 6.0));
   CHECK_THROWS(param.value(4.0));
   CHECK_NOTHROW(param.value(
       t[0] - 0.5 * Eigen::NumTraits<hc::value_type>::dummy_precision()));
